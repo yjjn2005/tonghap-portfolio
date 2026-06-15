@@ -162,11 +162,7 @@
                 class="bg-white/20 text-white text-[12px] font-bold border border-white/40 rounded px-2 py-1.5 cursor-pointer flex-shrink-0 max-w-[130px]">
                 <option value="유재진" class="text-black">👤 유재진</option>
                 <option value="김희연" class="text-black">👤 김희연</option>
-                <option value="유태현" class="text-black">👤 유태현</option>
-                <option value="유해인" class="text-black">👤 유해인</option>
-                <option value="유지원" class="text-black">👤 유지원</option>
-                <option value="유앤김" class="text-black">👫 유앤김</option>
-                <option value="ALL" class="text-black">👥 전체</option>
+                <option value="유앤김" class="text-black">👫 유재진+김희연</option>
             </select>
         </div>
         <!-- 오른쪽: 핵심 버튼 3개 -->
@@ -316,7 +312,7 @@
             <!-- 4인 비교 뷰 -->
             <div id="family-view" class="w-full h-full bg-white border border-gray-400 shadow-sm overflow-y-auto p-5" style="display:none">
                 <div class="flex items-center justify-between mb-5 border-b-2 border-[#107c41] pb-2">
-                    <h2 class="text-xl font-bold text-[#107c41]">👨‍👩‍👧‍👦 가족 5인 포트폴리오 동시 비교</h2>
+                    <h2 class="text-xl font-bold text-[#107c41]">👫 부부(유재진·김희연) 포트폴리오 비교</h2>
                     <div class="text-sm text-gray-500" id="family-date">기준일 -</div>
                 </div>
                 <div id="family-compare-content"></div>
@@ -351,7 +347,7 @@
         <div class="sheet-tab active" data-sheet="Dashboard">🏠 통합 대시보드</div>
         <div class="sheet-tab" data-sheet="All">📋 전체종목</div>
         <div class="sheet-tab" data-sheet="Top10">🏆 수익률 TOP10</div>
-        <div class="sheet-tab" data-sheet="FamilyCompare">👨‍👩‍👧‍👦 5인 비교</div>
+        <div class="sheet-tab" data-sheet="FamilyCompare">👫 부부 비교</div>
         <!-- 계좌 시트는 데이터 로드 후 동적 생성 -->
     </div>
 
@@ -424,9 +420,6 @@
                                 <select id="edit-owner" class="modal-input mt-0.5 text-sm">
                                     <option value="유재진">유재진</option>
                                     <option value="김희연">김희연</option>
-                                    <option value="유태현">유태현</option>
-                                    <option value="유해인">유해인</option>
-                                    <option value="유지원">유지원</option>
                                 </select>
                             </label>
                             <label class="block"><span class="text-gray-500 text-[11px] font-bold">계좌</span><input id="edit-sheet" class="modal-input mt-0.5 text-sm"></label>
@@ -524,9 +517,6 @@
                         <select id="ocr-owner" class="modal-input mt-1">
                             <option value="유재진">유재진</option>
                             <option value="김희연">김희연</option>
-                            <option value="유태현">유태현</option>
-                            <option value="유해인">유해인</option>
-                            <option value="유지원">유지원</option>
                         </select>
                     </label>
                     <label class="block">
@@ -681,6 +671,8 @@ const URL_TOKEN = URL_PARAMS.get('token') || localStorage.getItem('portfolio_tok
 const LOCK_OWNER = URL_OWNER && URL_OWNER.length > 0;
 if (URL_PARAMS.get('token')) localStorage.setItem('portfolio_token', URL_PARAMS.get('token'));
 let currentOwner  = URL_OWNER || localStorage.getItem('portfolio_owner') || '유재진';
+const ALLOWED_OWNERS = ['유재진','김희연','유앤김'];
+if (!ALLOWED_OWNERS.includes(currentOwner)) currentOwner = '유재진';
 let exchangeRates = { USD: 1350, JPY: 8.95 };
 let _exchangeRateFetchedAt = 0;  // 마지막 환율 fetch 시각 (ms)
 
@@ -1066,6 +1058,11 @@ async function fetchData(showLoading = false) {
         if (!data.success) throw new Error(data.error || 'API 오류');
 
         portfolioData = data.portfolio;
+        // 🔧 ticker/gfSymbol 이 숫자로 와도 문자열로 정규화 (.trim() 크래시 방지)
+        portfolioData.forEach(it => {
+            if (it.ticker != null)   it.ticker   = String(it.ticker);
+            if (it.gfSymbol != null) it.gfSymbol = String(it.gfSymbol);
+        });
         // Sheets에서 받은 환율을 기본값으로, 이후 Yahoo에서 최신값으로 업데이트
         if (data.rates) {
             if (data.rates.USD > 0) exchangeRates.USD = data.rates.USD;
@@ -1134,7 +1131,7 @@ function buildSheetTabs() {
     const familyTab = document.createElement('div');
     familyTab.className = 'sheet-tab';
     familyTab.dataset.sheet = 'FamilyCompare';
-    familyTab.textContent = '👨‍👩‍👧‍👦 5인 비교';
+    familyTab.textContent = '👫 부부 비교';
     container.appendChild(familyTab);
 
     container.querySelectorAll('.sheet-tab').forEach(tab => {
@@ -1161,7 +1158,7 @@ function changeSheet(sheetName, element) {
         document.getElementById('formulaBar').textContent = `=SUM('Portfolio'!평가금액)`;
     } else if (sheetName === 'FamilyCompare') {
         familyEl.style.display = '';
-        document.getElementById('formulaBar').textContent = `=가족4인_포트폴리오_비교()`;
+        document.getElementById('formulaBar').textContent = `=부부_포트폴리오_비교()`;
         renderFamilyComparison();
         return;
     } else {
@@ -1597,9 +1594,9 @@ function renderAnalysisTable() {
 function renderFamilyComparison() {
     const _fd = document.getElementById('family-date');
     if (_fd) { const d = new Date(); _fd.textContent = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} 기준`; }
-    const members = ['유재진','김희연','유태현','유해인','유지원'];
-    const colors  = ['#f39c12','#e74c3c','#2980b9','#27ae60','#8e44ad'];
-    const emojis  = ['👨','👩','👦','👧','👧'];
+    const members = ['유재진','김희연'];
+    const colors  = ['#f39c12','#e74c3c'];
+    const emojis  = ['👨','👩'];
 
     const container = document.getElementById('family-compare-content');
     if (!container) return;
@@ -1634,7 +1631,7 @@ function renderFamilyComparison() {
     <!-- 전체 합산 배너 -->
     <div style="background:linear-gradient(135deg,#107c41,#1a9e55);border-radius:10px;padding:18px 24px;margin-bottom:24px;color:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div>
-            <div style="font-size:13px;opacity:.8;font-weight:600">👨‍👩‍👧‍👦 5인 통합 총자산</div>
+            <div style="font-size:13px;opacity:.8;font-weight:600">👫 부부 통합 총자산</div>
             <div style="font-size:28px;font-weight:900;font-family:monospace;letter-spacing:-1px">₩${fmt(totalEval)}</div>
         </div>
         <div style="display:flex;gap:24px;flex-wrap:wrap">
@@ -1700,7 +1697,7 @@ function renderFamilyComparison() {
     <!-- 계좌별 상세 비교표 -->
     <div style="border:1px solid #cce5d4;border-radius:7px;overflow:hidden;margin-bottom:20px">
         <div style="background:#107c41;padding:12px 18px">
-            <span style="color:#fff;font-weight:700;font-size:15px">📊 4인 계좌별 상세 비교</span>
+            <span style="color:#fff;font-weight:700;font-size:15px">📊 부부 계좌별 상세 비교</span>
         </div>
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -1979,14 +1976,14 @@ function hasSameNameInOtherSheets(item) {
 function findManualSiblings(item) {
     if (!item || !portfolioData) return [];
     const clean = stripSuffix(item.name || '');
-    const ticker = (item.ticker || '').trim();  // 종목코드 (e.g. "449250")
+    const ticker = String(item.ticker || '').trim();  // 종목코드 (숫자로 와도 안전)
     if (!clean && !ticker) return [];
     return portfolioData.filter(s => {
         if (s.id === item.id || Number(s.qty) <= 0) return false;
         // 이름 일치
         if (clean && stripSuffix(s.name || '') === clean) return true;
         // 종목코드 일치 (이름이 달라도 같은 종목)
-        const sTicker = (s.ticker || '').trim();
+        const sTicker = String(s.ticker || '').trim();
         if (ticker && sTicker && ticker === sTicker) return true;
         return false;
     });
