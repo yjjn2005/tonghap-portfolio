@@ -1086,6 +1086,7 @@ async function fetchData(showLoading = false) {
             if (it.gfSymbol != null) it.gfSymbol = String(it.gfSymbol);
         });
         applyManualPriceOverrides();  // 저장된 수동 현재가 재적용 (처음부터 반영)
+        _crossVerified = false;       // 동기화마다 야후·구글 교차검증 재실행
         // Sheets에서 받은 환율을 기본값으로, 이후 Yahoo에서 최신값으로 업데이트
         if (data.rates) {
             if (data.rates.USD > 0) exchangeRates.USD = data.rates.USD;
@@ -1106,6 +1107,7 @@ async function fetchData(showLoading = false) {
         buildSheetTabs();
         applyUpdates();
         localStorage.setItem('portfolio_cache', JSON.stringify({ portfolioData, exchangeRates, ts: Date.now() }));
+        crossVerifyPrices();          // 백그라운드 야후·구글 교차검증
 
         if (showLoading) toast(`✅ 동기화 완료 — ${portfolioData.length}개 종목 갱신`);
     } catch (err) {
@@ -1314,7 +1316,7 @@ function renderGridTable() {
         const nameCellClass = isManual ? 'font-bold text-blue-700' : 'font-bold text-gray-800';
         tr.innerHTML = `
             ${checkboxCell}
-            <td class="${nameCellClass}">${item.name}${liveTag}</td>
+            <td class="${nameCellClass}">${item.name}${liveTag}${verifyBadge(item)}</td>
             <td class="text-center text-[11px] text-gray-500 font-mono">${item.ticker || '-'}</td>
             <td class="text-blue-700 text-xs font-bold">${item.sheet}</td>
             <td class="text-right font-mono text-gray-800">${fmtNum(item.qty)}</td>
@@ -1948,6 +1950,83 @@ const CORS_CIO  = 'https://corsproxy.io/?';
 const LIVE_FETCH_MAP = [
     { name:'소프트뱅크그룹', yahoo:'9984.T', currency:'JPY' },
 ];
+
+// ── 현재가 교차검증 (Yahoo Finance ↔ Google Finance) ──────────────────
+// 백엔드 currentPrice = GOOGLEFINANCE 값. Yahoo 값과 대조하여 불일치 시 Yahoo로 보정.
+let _priceVerify = {};      // { ticker: {yahoo, google, status} }
+let _crossVerified = false;
+function yahooCandidates(item) {
+    let tk = String(item.ticker || '').trim().replace(/\.(KS|KQ|T)$/i, '');
+    if (!tk) return [];
+    if (item.currency === 'USD') return [tk];
+    if (item.currency === 'JPY') return [tk + '.T'];
+    if (/^\d{6}$/.test(tk)) return [tk + '.KS', tk + '.KQ'];   // 국내 6자리: 코스피/코스닥 둘 다 시도
+    return [tk];
+}
+async function crossVerifyPrices() {
+    if (_crossVerified) return;
+    _crossVerified = true;
+    const byTicker = {};
+    portfolioData.forEach(it => {
+        if ((it.qty || 0) <= 0 || it.type === '채권' || it.type === '예금/현금') return;
+        if (manualPrices[manualKey(it)] != null) return;     // 수동입력 우선 → 검증 스킵
+        const tk = String(it.ticker || '').trim();
+        if (!tk) return;
+        if (!byTicker[tk]) byTicker[tk] = it;
+    });
+    const entries = Object.entries(byTicker);
+    if (!entries.length) return;
+    let idx = 0;
+    const worker = async () => {
+        while (idx < entries.length) {
+            const [tk, item] = entries[idx++];
+            let yahoo = 0;
+            for (const sym of yahooCandidates(item)) {
+                try {
+                    const d = await _yahooJSON(sym, 'interval=1d&range=2d');
+                    const p = d && d.chart && d.chart.result && d.chart.result[0] && d.chart.result[0].meta && d.chart.result[0].meta.regularMarketPrice;
+                    if (p > 0) { yahoo = p; break; }
+                } catch (e) {}
+            }
+            const google = Number(item.currentPrice) || 0;
+            let status, usedPrice = 0, apply = false;
+            if (yahoo > 0 && google > 0) {
+                const diff = Math.abs(yahoo - google) / yahoo;
+                if (diff <= 0.03) { status = 'ok'; }
+                else { status = 'fix'; usedPrice = yahoo; apply = true; }
+            } else if (yahoo > 0) { status = 'yahoo'; usedPrice = yahoo; apply = true; }
+            else if (google > 0) { status = 'google'; }
+            else { status = 'none'; }
+            _priceVerify[tk] = { yahoo, google, status };
+            portfolioData.forEach(s2 => {
+                if (String(s2.ticker || '').trim() !== tk || (s2.qty || 0) <= 0) return;
+                if (manualPrices[manualKey(s2)] != null) return;
+                s2._verify = _priceVerify[tk];
+                if (apply && usedPrice > 0) {
+                    s2.currentPrice = usedPrice;
+                    s2.evalAmount = Math.round(
+                        s2.currency === 'USD' ? s2.qty * usedPrice * (exchangeRates.USD || 1350)
+                        : s2.currency === 'JPY' ? s2.qty * usedPrice * (exchangeRates.JPY || 9)
+                        : s2.qty * usedPrice
+                    );
+                }
+            });
+        }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);   // 동시 4개
+    applyUpdates();
+    const fixed = Object.values(_priceVerify).filter(v => v.status === 'fix').length;
+    if (fixed > 0) toast(`🔎 야후·구글 교차검증 완료 — ${fixed}개 종목 Yahoo 값으로 보정`);
+}
+function verifyBadge(item) {
+    const v = item._verify;
+    if (!v) return '';
+    if (v.status === 'ok')     return `<span class="text-[8px] text-green-600 font-bold ml-1" title="✓ 교차검증 일치: Yahoo ₩${fmtNum(v.yahoo)} ≈ Google ₩${fmtNum(v.google)}">✓</span>`;
+    if (v.status === 'fix')    return `<span class="text-[8px] text-red-600 font-bold ml-1" title="⚠️ 불일치 → Yahoo 채택: Google ₩${fmtNum(v.google)} → Yahoo ₩${fmtNum(v.yahoo)}">⚠</span>`;
+    if (v.status === 'yahoo')  return `<span class="text-[8px] text-blue-600 ml-1" title="Yahoo ₩${fmtNum(v.yahoo)} (Google 미연동)">Y</span>`;
+    if (v.status === 'google') return `<span class="text-[8px] text-gray-400 ml-1" title="Google ₩${fmtNum(v.google)} (Yahoo 미확인)">G</span>`;
+    return '';
+}
 
 // (수정본) 모든 외부 fetch는 fetchTextViaProxy/fetchJSONViaProxy 폴백 체인 사용
 async function _alloriginsJSON(url) {
