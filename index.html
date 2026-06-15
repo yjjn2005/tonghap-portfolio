@@ -43,7 +43,9 @@
         @keyframes flashGreen { 0%{background-color:#bbf7d0} 100%{background-color:transparent} }
         .flash-update { animation:flashGreen 1.5s ease-out; }
         #dashboard-view, #grid-view { display:none; height:100%; }
-        #dashboard-view.active, #grid-view.active { display:flex; flex-direction:column; }
+        #grid-view.active { display:flex; flex-direction:column; }
+        /* 대시보드는 block — flex-column 시 자식(계좌별 손익분석)이 축소되어 잘리는 버그 방지 */
+        #dashboard-view.active { display:block; }
         .modal-input { width:100%; border:1px solid #c6c6c6; padding:6px 8px; font-size:13px; outline:none; }
         .modal-input:focus { border-color:#107c41; box-shadow:0 0 0 2px rgba(16,124,65,0.15); }
         .live-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#22c55e; margin-right:4px; animation:pulse 1.8s ease-in-out infinite; }
