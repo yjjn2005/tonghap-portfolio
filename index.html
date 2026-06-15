@@ -326,13 +326,13 @@
                     <thead class="sticky top-0 z-10 shadow-sm">
                         <tr>
                             <th class="w-10 bg-[#f3f2f1] text-gray-500 font-mono text-[11px]">No.</th>
-                            <th class="p-0 w-60"><button onclick="handleSort('name')" class="sort-btn px-3 text-xs text-left"><span>종목명 (Ticker)</span><span class="sort-icon text-gray-400 text-[10px]" data-key="name">▼</span></button></th>
+                            <th class="p-0 w-56"><button onclick="handleSort('name')" class="sort-btn px-3 text-xs text-left"><span>종목명</span><span class="sort-icon text-gray-400 text-[10px]" data-key="name">▼</span></button></th>
+                            <th class="p-0 w-24"><button onclick="handleSort('ticker')" class="sort-btn px-2 text-xs"><span>티커/종목번호</span><span class="sort-icon text-gray-400 text-[10px]" data-key="ticker">▼</span></button></th>
                             <th class="p-0 w-32"><button onclick="handleSort('sheet')" class="sort-btn px-2 text-xs"><span>계좌</span><span class="sort-icon text-gray-400 text-[10px]" data-key="sheet">▼</span></button></th>
-                            <th class="p-0 w-24"><button onclick="handleSort('type')" class="sort-btn px-2 text-xs"><span>자산구분</span><span class="sort-icon text-gray-400 text-[10px]" data-key="type">▼</span></button></th>
-                            <th class="p-0 w-20"><button onclick="handleSort('qty')" class="sort-btn px-2 justify-end text-xs"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="qty">▼</span><span>수량</span></button></th>
-                            <th class="w-16 text-xs font-bold text-gray-600 bg-gray-50">통화</th>
+                            <th class="p-0 w-20"><button onclick="handleSort('qty')" class="sort-btn px-2 justify-end text-xs"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="qty">▼</span><span>보유수량</span></button></th>
+                            <th class="w-28 bg-amber-50 text-right pr-2"><div class="text-xs font-bold text-amber-800">매수단가(₩)</div><div class="text-[8px] text-amber-600 font-normal">클릭→입력</div></th>
                             <th class="p-0 w-28 bg-yellow-50"><button onclick="handleSort('currentPrice')" class="sort-btn px-2 justify-end text-xs bg-yellow-50"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="currentPrice">▼</span><span class="text-orange-800">현재가</span></button></th>
-                            <th class="p-0 w-32"><button onclick="handleSort('buyAmount')" class="sort-btn px-2 justify-end text-xs"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="buyAmount">▼</span><span>매입금액(₩)</span></button></th>
+                            <th class="p-0 w-32"><button onclick="handleSort('buyAmount')" class="sort-btn px-2 justify-end text-xs"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="buyAmount">▼</span><span>매수금액(₩)</span></button></th>
                             <th class="p-0 w-32 bg-blue-50"><button onclick="handleSort('evalAmount')" class="sort-btn px-2 justify-end text-xs bg-blue-50"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="evalAmount">▼</span><span class="text-blue-800 font-bold">평가금액(₩)</span></button></th>
                             <th class="p-0 w-28"><button onclick="handleSort('profit')" class="sort-btn px-2 justify-end text-xs"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="profit">▼</span><span>평가손익(₩)</span></button></th>
                             <th class="p-0 w-24"><button onclick="handleSort('returnRate')" class="sort-btn px-2 justify-end text-xs"><span class="sort-icon text-gray-400 text-[10px] mr-1" data-key="returnRate">▼</span><span>수익률</span></button></th>
@@ -1218,10 +1218,16 @@ function renderGridTable() {
         tbody.innerHTML = `<tr><td colspan="11" class="text-center py-12 text-gray-500 font-bold bg-gray-50 text-sm">해당 시트에 데이터가 없습니다.</td></tr>`;
         return;
     }
-    currentData.forEach((item,i) => {
+
+    let rowNo = 0;
+
+    // ── 한 종목 행 렌더 ──
+    const renderRow = (item) => {
+        rowNo++;
         const tr = document.createElement('tr');
         const isLive = item.currentPrice > 0 && item.gfSymbol;
-        const isManual = isManualStock(item);  // 🔵 수동 입력 대상 (지정된 종목만)
+        const isManual = isManualStock(item);
+        const qty = Number(item.qty) || 0;
         if (isManual) tr.classList.add('manual-row');
         if (bulkMode) {
             tr.onclick = (e) => {
@@ -1234,32 +1240,43 @@ function renderGridTable() {
         }
         const checkboxCell = bulkMode
             ? `<td class="text-center bg-[#e6e6e6] border-r-2 border-r-gray-300"><input type="checkbox" ${bulkSelectedIds.has(item.id)?'checked':''} onchange="toggleBulkItem(${item.id}, this.checked)" onclick="event.stopPropagation()"></td>`
-            : `<td class="text-center text-gray-500 bg-[#e6e6e6] font-mono text-[11px] border-r-2 border-r-gray-300">${i+1}</td>`;
+            : `<td class="text-center text-gray-500 bg-[#e6e6e6] font-mono text-[11px] border-r-2 border-r-gray-300">${rowNo}</td>`;
         const liveTag = isLive
             ? '<span class="ml-1 text-[9px] text-green-600 font-bold bg-green-50 px-1 rounded">LIVE</span>'
-            : (isManual ? '<span class="manual-badge" title="수동 입력 종목 — 현재가 칸에 직접 입력 가능">🔵 수동</span>' : '');
-        const evalCellClass = isManual
-            ? 'text-right font-mono font-bold manual-eval-cell'
-            : 'text-right font-mono font-bold text-blue-900 bg-blue-50/40';
+            : '<span class="ml-1 text-[9px] text-blue-600 font-bold bg-blue-50 px-1 rounded">✏️수동</span>';
 
-        // 🔵 청색 종목: 현재가 칸을 인라인 입력으로 표시
+        // ── 매수단가(₩) : 항상 인라인 편집 가능 ──
+        const buyPerShare = qty > 0 ? Math.round((Number(item.buyAmount)||0) / qty * 100) / 100 : 0;
+        let buyCellHTML;
+        if (qty > 0) {
+            buyCellHTML = `<td class="text-right whitespace-nowrap bg-amber-50/40" onclick="event.stopPropagation()">
+                <input type="number" step="any" value="${buyPerShare||''}" placeholder="입력"
+                    class="inline-price-input" id="buy-input-${item.id}" data-original="${buyPerShare}"
+                    title="매수단가(1주당) — 클릭 후 입력하면 매수금액 자동계산·저장"
+                    onfocus="onInlinePriceFocus(this)"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();} else if(event.key==='Escape'){this.value=this.dataset.original;this.blur();}"
+                    onblur="onInlineBuyBlur(${item.id}, this.value, ${buyPerShare})">
+            </td>`;
+        } else {
+            buyCellHTML = `<td class="text-right font-mono text-gray-400 bg-amber-50/30">-</td>`;
+        }
+
+        // ── 현재가 : 라이브면 표시, 동기화 안되면 인라인 편집 ──
+        const canEditPrice = !isLive && qty > 0 && item.type !== '채권' && item.type !== '예금/현금';
         let priceCellHTML;
-        if (isManual) {
-            const qty = Number(item.qty) || 0;
+        if (canEditPrice) {
             const evalAmt = getEffectiveEval(item);
             const pricePerShare = qty > 0 ? Math.round((evalAmt / qty) * 100) / 100 : 0;
-            // 동일 종목 sibling 개수 미리 계산 → 툴팁/배지에 표시
             const siblings = findManualSiblings(item);
             const sibCount = siblings.length;
             const sibTitle = sibCount > 0
                 ? `🔗 동일종목 ${sibCount}개 자동 동기화: ` + siblings.map(s => `${s.sheet}(${s.qty}주)`).join(', ')
-                : '동일 종목 없음 — 본인만 적용';
+                : '현재가 직접 입력 — 클릭 후 입력 → Enter/Tab 저장';
             const syncBadge = sibCount > 0 ? `<span class="text-[8px] text-blue-700 font-bold ml-1">🔗${sibCount}</span>` : '';
             priceCellHTML = `<td class="text-right whitespace-nowrap" onclick="event.stopPropagation()">
-                <input type="number" step="any" value="${pricePerShare}" placeholder="${pricePerShare}"
-                    class="inline-price-input" id="price-input-${item.id}"
-                    data-original="${pricePerShare}"
-                    title="${sibTitle}\n클릭 시 기존 값 삭제 → 새 가격 입력 → Enter/Tab 저장"
+                <input type="number" step="any" value="${pricePerShare||''}" placeholder="입력"
+                    class="inline-price-input" id="price-input-${item.id}" data-original="${pricePerShare}"
+                    title="${sibTitle}"
                     onfocus="onInlinePriceFocus(this)"
                     onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();} else if(event.key==='Escape'){this.value=this.dataset.original;this.blur();}"
                     onblur="onInlinePriceBlur(${item.id}, this.value, ${pricePerShare})">${syncBadge}
@@ -1268,14 +1285,17 @@ function renderGridTable() {
             priceCellHTML = `<td class="text-right font-mono font-bold text-orange-800 bg-yellow-50/40">${fmtPrice(item.currentPrice, item.currency)}</td>`;
         }
 
+        const evalCellClass = isManual
+            ? 'text-right font-mono font-bold manual-eval-cell'
+            : 'text-right font-mono font-bold text-blue-900 bg-blue-50/40';
         const nameCellClass = isManual ? 'font-bold text-blue-700' : 'font-bold text-gray-800';
         tr.innerHTML = `
             ${checkboxCell}
-            <td class="${nameCellClass}">${item.name} <span class="text-[10px] text-gray-400 ml-1.5 font-normal">${item.ticker||''}</span>${liveTag}</td>
+            <td class="${nameCellClass}">${item.name}${liveTag}</td>
+            <td class="text-center text-[11px] text-gray-500 font-mono">${item.ticker || '-'}</td>
             <td class="text-blue-700 text-xs font-bold">${item.sheet}</td>
-            <td class="text-center text-xs text-gray-600">${item.type}</td>
             <td class="text-right font-mono text-gray-800">${fmtNum(item.qty)}</td>
-            <td class="text-center text-[10px] text-gray-500 font-mono font-bold">${item.currency}</td>
+            ${buyCellHTML}
             ${priceCellHTML}
             <td class="text-right font-mono text-gray-600">${fmtNum(item.buyAmount)}</td>
             <td class="${evalCellClass}">${fmtNum(getEffectiveEval(item))}</td>
@@ -1283,7 +1303,43 @@ function renderGridTable() {
             <td class="text-right font-mono font-bold text-sm tracking-tight ${clr(getEffectiveRate(item))}">${fmtPct(getEffectiveRate(item))}</td>
         `;
         tbody.appendChild(tr);
-    });
+    };
+
+    // ── 합계/소계 행 (검증용) ──
+    const totalRow = (label, rows, accent, bg) => {
+        const buy  = rows.reduce((s,i) => s + getEffectiveBuy(i), 0);
+        const ev   = rows.reduce((s,i) => s + getEffectiveEval(i), 0);
+        const prof = ev - buy;
+        const rate = buy ? prof / buy * 100 : 0;
+        const tr = document.createElement('tr');
+        tr.style.cssText = `background:${bg};border-top:2px solid ${accent}`;
+        tr.innerHTML = `
+            <td colspan="7" style="text-align:right;padding:7px 12px;color:${accent};font-weight:800">${label} · ${rows.length}종목 합계 ▶</td>
+            <td class="text-right font-mono" style="font-weight:800;color:${accent}">${fmtNum(buy)}</td>
+            <td class="text-right font-mono" style="font-weight:800;color:#1a56a4">${fmtNum(ev)}</td>
+            <td class="text-right font-mono ${clr(prof)}" style="font-weight:800">${fmtNum(prof)}</td>
+            <td class="text-right font-mono ${clr(rate)}" style="font-weight:800">${fmtPct(rate)}</td>`;
+        tbody.appendChild(tr);
+    };
+
+    if (currentActiveSheet === 'All') {
+        // 전체종목 → 계좌별 그룹 + 소계 + 총합 (검증 구조)
+        const groups = {};
+        currentData.forEach(i => { const k = i.sheet || '기타'; (groups[k] = groups[k] || []).push(i); });
+        const orderedKeys = Object.keys(groups).sort((a,b) =>
+            groups[b].reduce((s,i)=>s+getEffectiveEval(i),0) - groups[a].reduce((s,i)=>s+getEffectiveEval(i),0));
+        orderedKeys.forEach(k => {
+            groups[k].forEach(renderRow);
+            totalRow(`📁 ${k}`, groups[k], '#107c41', '#edf7f1');
+        });
+        totalRow('🔢 전체 총합', currentData, '#6a1b9a', '#f3e8ff');
+    } else {
+        currentData.forEach(renderRow);
+        if (currentActiveSheet !== 'Top10') {
+            const lbl = (currentActiveSheet === 'Dashboard') ? '🔢 총합' : `🔢 ${currentActiveSheet}`;
+            totalRow(lbl, currentData, '#6a1b9a', '#f3e8ff');
+        }
+    }
 }
 
 // 🔵 현재가 칸 포커스(클릭) 시 기존 값 자동 삭제
@@ -1370,6 +1426,43 @@ async function onInlinePriceBlur(itemId, newPriceStr, originalPrice) {
     } catch (err) {
         toast(`❌ 저장 실패: ${err.message}`, false);
         if (inputEl) inputEl.value = originalPrice;
+    } finally {
+        if (inputEl) inputEl.disabled = false;
+    }
+}
+
+// ✏️ 매수단가(1주당) 직접 입력 → 매수금액 저장 (저장 즉시 반영)
+async function onInlineBuyBlur(itemId, valStr, originalPerShare) {
+    const inputEl = document.getElementById('buy-input-' + itemId);
+    if (valStr === '' || valStr === null || valStr === undefined) {
+        if (inputEl) inputEl.value = originalPerShare || '';
+        return;
+    }
+    const v = Number(valStr);
+    if (isNaN(v) || v < 0) {
+        toast('❌ 유효한 매수단가를 입력하세요', false);
+        if (inputEl) inputEl.value = originalPerShare || '';
+        return;
+    }
+    if (Math.abs(v - originalPerShare) < 0.01) {  // 변화 없음
+        if (inputEl) inputEl.value = originalPerShare || '';
+        return;
+    }
+    const item = portfolioData.find(s => s.id === itemId);
+    if (!item) return;
+    const qty = Number(item.qty) || 0;
+    if (qty <= 0) { toast('❌ 수량이 0입니다 — 먼저 수량을 입력하세요', false); return; }
+    const newBuy = Math.round(v * qty);
+    if (inputEl) inputEl.disabled = true;
+    try {
+        await apiPost({ action:'update', id: itemId, updates: { buyAmount: newBuy } });
+        if (inputEl) { inputEl.classList.add('inline-price-saved'); setTimeout(() => inputEl.classList.remove('inline-price-saved'), 1500); }
+        toast(`✅ 매수단가 ₩${fmtNum(v)}/주 저장 — 매수금액 ₩${fmtNum(newBuy)}`);
+        await new Promise(r => setTimeout(r, 400));
+        await fetchData(false);
+    } catch (err) {
+        toast(`❌ 저장 실패: ${err.message}`, false);
+        if (inputEl) inputEl.value = originalPerShare || '';
     } finally {
         if (inputEl) inputEl.disabled = false;
     }
