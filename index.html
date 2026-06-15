@@ -1960,6 +1960,7 @@ function yahooCandidates(item) {
     if (!tk) return [];
     if (item.currency === 'USD') return [tk];
     if (item.currency === 'JPY') return [tk + '.T'];
+    if (/^\d+$/.test(tk)) tk = tk.padStart(6, '0');           // 숫자형 국내코드: 앞자리 0 복원 (88980→088980)
     if (/^\d{6}$/.test(tk)) return [tk + '.KS', tk + '.KQ'];   // 국내 6자리: 코스피/코스닥 둘 다 시도
     return [tk];
 }
