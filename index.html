@@ -1971,6 +1971,30 @@ function yahooCandidates(item) {
     if (/^\d{6}$/.test(tk)) return [tk + '.KS', tk + '.KQ'];   // 국내 6자리: 코스피/코스닥 둘 다 시도
     return [tk];
 }
+// 야후 KR 가격: .KS/.KQ 둘 다 조회 → 실제 종목(EQUITY/ETF)만 채택, MUTUALFUND/INDEX 거부
+async function yahooKRPrice(code) {
+    let backup = 0;
+    for (const suf of ['.KS', '.KQ']) {
+        try {
+            const d = await _yahooJSON(code + suf, 'interval=1d&range=2d');
+            const m = d && d.chart && d.chart.result && d.chart.result[0] && d.chart.result[0].meta;
+            const p = m && m.regularMarketPrice;
+            const it = m && m.instrumentType;
+            if (p > 0 && (it === 'EQUITY' || it === 'ETF')) return p;     // 실제 종목 → 채택
+            if (p > 0 && !backup && it !== 'MUTUALFUND') backup = p;       // 백업 후보
+        } catch (e) {}
+    }
+    return backup;
+}
+// 네이버 fchart 종가 (코드 기반, 야후 실패 시 폴백)
+async function fetchNaverClose(code) {
+    try {
+        const xml = await fetchTextViaProxy('https://fchart.stock.naver.com/sise.nhn?symbol=' + code + '&timeframe=day&count=2&requestType=0', 7000);
+        const ms = [...xml.matchAll(/data="\d{8}\|\d+\|\d+\|\d+\|(\d+)\|/g)];
+        if (ms.length) return Number(ms[ms.length - 1][1]);
+    } catch (e) {}
+    return 0;
+}
 async function crossVerifyPrices() {
     if (_crossVerified) return;
     _crossVerified = true;
@@ -1988,24 +2012,29 @@ async function crossVerifyPrices() {
     const worker = async () => {
         while (idx < entries.length) {
             const [tk, item] = entries[idx++];
-            let yahoo = 0;
-            for (const sym of yahooCandidates(item)) {
-                try {
-                    const d = await _yahooJSON(sym, 'interval=1d&range=2d');
-                    const p = d && d.chart && d.chart.result && d.chart.result[0] && d.chart.result[0].meta && d.chart.result[0].meta.regularMarketPrice;
-                    if (p > 0) { yahoo = p; break; }
-                } catch (e) {}
+            let verified = 0;
+            let code6 = String(item.ticker || '').trim().replace(/\.(KS|KQ|T)$/i, '');
+            if (/^\d+$/.test(code6)) code6 = code6.padStart(6, '0');
+            if (item.currency === 'KRW' && /^\d{6}$/.test(code6)) {
+                verified = await yahooKRPrice(code6);                 // 야후 .KS/.KQ 중 실제종목
+                if (!(verified > 0)) verified = await fetchNaverClose(code6);   // 네이버 폴백
+            } else {
+                for (const sym of yahooCandidates(item)) {            // US/JP
+                    try {
+                        const d = await _yahooJSON(sym, 'interval=1d&range=2d');
+                        const p = d && d.chart && d.chart.result && d.chart.result[0] && d.chart.result[0].meta && d.chart.result[0].meta.regularMarketPrice;
+                        if (p > 0) { verified = p; break; }
+                    } catch (e) {}
+                }
             }
             const google = Number(item.currentPrice) || 0;
             let status, usedPrice = 0, apply = false;
-            if (yahoo > 0 && google > 0) {
-                const diff = Math.abs(yahoo - google) / yahoo;
-                if (diff <= 0.03) { status = 'ok'; }
-                else { status = 'fix'; usedPrice = yahoo; apply = true; }
-            } else if (yahoo > 0) { status = 'yahoo'; usedPrice = yahoo; apply = true; }
-            else if (google > 0) { status = 'google'; }
+            if (verified > 0) {
+                usedPrice = verified; apply = true;                  // 검증값 항상 적용 (정확한 금일 종가)
+                status = (google > 0 && Math.abs(verified - google) / verified <= 0.03) ? 'ok' : 'fix';
+            } else if (google > 0) { status = 'google'; }
             else { status = 'none'; }
-            _priceVerify[tk] = { yahoo, google, status };
+            _priceVerify[tk] = { yahoo: verified, google, status };
             portfolioData.forEach(s2 => {
                 if (String(s2.ticker || '').trim() !== tk || (s2.qty || 0) <= 0) return;
                 if (manualPrices[manualKey(s2)] != null) return;
@@ -2026,7 +2055,7 @@ async function crossVerifyPrices() {
     const nameToPrice = {};
     portfolioData.forEach(it => {
         const v = it._verify;
-        if (v && v.yahoo > 0) { const nm = stripSuffix(it.name || ''); if (nm && !nameToPrice[nm]) nameToPrice[nm] = (v.status === 'fix' || v.status === 'yahoo') ? v.yahoo : (v.google || v.yahoo); }
+        if (v && v.yahoo > 0) { const nm = stripSuffix(it.name || ''); if (nm && !nameToPrice[nm]) nameToPrice[nm] = v.yahoo; }
     });
     portfolioData.forEach(it => {
         if ((it.qty || 0) <= 0 || it.type === '채권' || it.type === '예금/현금') return;
