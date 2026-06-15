@@ -684,6 +684,8 @@ function manualKey(item) {
     return tk || stripSuffix((item && item.name) || '');
 }
 function saveManualPrices() { try { localStorage.setItem('manual_prices', JSON.stringify(manualPrices)); } catch(e) {} }
+// 통화별 환율 (1주당 native 가격 → 원화 평가금액 환산)
+function fxOf(cur) { return cur === 'USD' ? (exchangeRates.USD || 1350) : cur === 'JPY' ? (exchangeRates.JPY || 9) : 1; }
 // 저장된 수동 현재가를 portfolioData 전체에 적용 (동일 ticker/이름 → 모든 시트 연동)
 function applyManualPriceOverrides() {
     if (!portfolioData || !portfolioData.length) return;
@@ -691,8 +693,8 @@ function applyManualPriceOverrides() {
         if (it.type === '채권' || it.type === '예금/현금') return;
         const p = manualPrices[manualKey(it)];
         if (p != null && Number(it.qty) > 0) {
-            it.currentPrice = p;
-            it.evalAmount = Math.round(p * Number(it.qty));
+            it.currentPrice = p;                                  // native 가격
+            it.evalAmount = Math.round(p * Number(it.qty) * fxOf(it.currency));  // 원화 환산
         }
     });
 }
@@ -1288,7 +1290,11 @@ function renderGridTable() {
         // ── 현재가 : 연동 안되는 종목만 매수단가와 동일한 직접 입력칸 / 라이브는 읽기전용 표시 ──
         const priceEditable = qty > 0 && item.type !== '채권' && item.type !== '예금/현금';
         const _evalAmt = getEffectiveEval(item);
-        const pricePerShare = qty > 0 ? Math.round((_evalAmt / qty) * 100) / 100 : 0;
+        const _cur = item.currency || 'KRW';
+        const _sym = _cur === 'USD' ? '$' : _cur === 'JPY' ? '¥' : '₩';
+        const pricePerShare = Number(item.currentPrice) > 0
+            ? Math.round(Number(item.currentPrice) * 100) / 100
+            : (qty > 0 ? Math.round((_evalAmt / qty / fxOf(_cur)) * 100) / 100 : 0);
         const _sibs = priceEditable ? findManualSiblings(item) : [];
         const _sibTitle = _sibs.length > 0
             ? `🔗 입력 시 동일종목 ${_sibs.length}개 시트 자동 동기화: ` + _sibs.map(s => `${s.sheet}(${s.qty}주)`).join(', ')
@@ -1298,7 +1304,7 @@ function renderGridTable() {
         if (priceEditable && (isManual || !isLive)) {
             // 비연동/수동지정 종목 → 바로 입력칸 (매수단가와 동일한 방법, 입력 시 전체 시트 동기화)
             priceCellHTML = `<td id="pcell-${item.id}" class="text-right whitespace-nowrap" onclick="event.stopPropagation()">
-                <input type="number" step="any" value="${pricePerShare||''}" placeholder="입력"
+                <span class="text-gray-400 text-[10px] mr-0.5">${_sym}</span><input type="number" step="any" value="${pricePerShare||''}" placeholder="입력"
                     class="inline-price-input" id="price-input-${item.id}" data-original="${pricePerShare}"
                     title="${_sibTitle}"
                     onfocus="onInlinePriceFocus(this)"
@@ -1421,7 +1427,7 @@ async function onInlinePriceBlur(itemId, newPriceStr, originalPrice) {
     portfolioData.forEach(s => {
         if (manualKey(s) === key && Number(s.qty) > 0 && s.type !== '채권' && s.type !== '예금/현금') {
             s.currentPrice = newPrice;
-            s.evalAmount = Math.round(newPrice * Number(s.qty));
+            s.evalAmount = Math.round(newPrice * Number(s.qty) * fxOf(s.currency));
             if (s.id !== itemId) synced.push(s.sheet);
         }
     });
@@ -1430,15 +1436,16 @@ async function onInlinePriceBlur(itemId, newPriceStr, originalPrice) {
     applyUpdates();
 
     const uniq = [...new Set(synced)];
+    const _ps = fmtPrice(newPrice, item.currency);
     toast(uniq.length > 0
-        ? `✅ ₩${fmtNum(newPrice)}/주 적용 — 동일종목 ${uniq.length}개 시트 연동: ${uniq.join(', ')}`
-        : `✅ ₩${fmtNum(newPrice)}/주 적용 — 평가 ₩${fmtNum(Math.round(newPrice * qty))}`);
+        ? `✅ ${_ps}/주 적용 — 동일종목 ${uniq.length}개 시트 연동: ${uniq.join(', ')}`
+        : `✅ ${_ps}/주 적용 — 평가 ₩${fmtNum(Math.round(newPrice * qty * fxOf(item.currency)))}`);
 
     // ④ 백그라운드 best-effort 서버 저장 (타기기/영구화 대비, initialEval)
     const affected = portfolioData.filter(s => manualKey(s) === key && Number(s.qty) > 0 && s.type !== '채권' && s.type !== '예금/현금');
     (async () => {
         for (const s of affected) {
-            try { await apiPost({ action:'update', id: s.id, updates: { initialEval: Math.round(newPrice * Number(s.qty)) } }); }
+            try { await apiPost({ action:'update', id: s.id, updates: { initialEval: Math.round(newPrice * Number(s.qty) * fxOf(s.currency)) } }); }
             catch (e) { /* 로컬 저장 완료 — 서버 실패 무시 */ }
             await new Promise(r => setTimeout(r, 120));
         }
@@ -2015,6 +2022,24 @@ async function crossVerifyPrices() {
         }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);   // 동시 4개
+    // 이름 기반 보완: 티커가 야후에서 안 잡힌 동일종목을 검증된 가격으로 보정 (예: PLUS 고배당주 406390→161510 값)
+    const nameToPrice = {};
+    portfolioData.forEach(it => {
+        const v = it._verify;
+        if (v && v.yahoo > 0) { const nm = stripSuffix(it.name || ''); if (nm && !nameToPrice[nm]) nameToPrice[nm] = (v.status === 'fix' || v.status === 'yahoo') ? v.yahoo : (v.google || v.yahoo); }
+    });
+    portfolioData.forEach(it => {
+        if ((it.qty || 0) <= 0 || it.type === '채권' || it.type === '예금/현금') return;
+        if (manualPrices[manualKey(it)] != null) return;
+        if (it._verify && it._verify.yahoo > 0) return;   // 이미 검증됨
+        const p = nameToPrice[stripSuffix(it.name || '')];
+        if (p > 0) {
+            const g = Number(it.currentPrice) || 0;
+            it.currentPrice = p;
+            it.evalAmount = Math.round(p * Number(it.qty) * fxOf(it.currency));
+            it._verify = { yahoo: p, google: g, status: 'name' };
+        }
+    });
     applyUpdates();
     const fixed = Object.values(_priceVerify).filter(v => v.status === 'fix').length;
     if (fixed > 0) toast(`🔎 야후·구글 교차검증 완료 — ${fixed}개 종목 Yahoo 값으로 보정`);
@@ -2026,6 +2051,7 @@ function verifyBadge(item) {
     if (v.status === 'fix')    return `<span class="text-[8px] text-red-600 font-bold ml-1" title="⚠️ 불일치 → Yahoo 채택: Google ₩${fmtNum(v.google)} → Yahoo ₩${fmtNum(v.yahoo)}">⚠</span>`;
     if (v.status === 'yahoo')  return `<span class="text-[8px] text-blue-600 ml-1" title="Yahoo ₩${fmtNum(v.yahoo)} (Google 미연동)">Y</span>`;
     if (v.status === 'google') return `<span class="text-[8px] text-gray-400 ml-1" title="Google ₩${fmtNum(v.google)} (Yahoo 미확인)">G</span>`;
+    if (v.status === 'name')   return `<span class="text-[8px] text-purple-600 font-bold ml-1" title="동일종목 검증가 적용: ₩${fmtNum(v.yahoo)} (이 행 종목번호는 미연동)">≈</span>`;
     return '';
 }
 
