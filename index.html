@@ -1261,28 +1261,34 @@ function renderGridTable() {
             buyCellHTML = `<td class="text-right font-mono text-gray-400 bg-amber-50/30">-</td>`;
         }
 
-        // ── 현재가 : 라이브면 표시, 동기화 안되면 인라인 편집 ──
-        const canEditPrice = !isLive && qty > 0 && item.type !== '채권' && item.type !== '예금/현금';
+        // ── 현재가 : 채권/예금/수량0 외 모든 종목 입력 가능 (비연동=바로 입력칸, 라이브=클릭시 입력) ──
+        const priceEditable = qty > 0 && item.type !== '채권' && item.type !== '예금/현금';
+        const _evalAmt = getEffectiveEval(item);
+        const pricePerShare = qty > 0 ? Math.round((_evalAmt / qty) * 100) / 100 : 0;
+        const _sibs = priceEditable ? findManualSiblings(item) : [];
+        const _sibTitle = _sibs.length > 0
+            ? `🔗 입력 시 동일종목 ${_sibs.length}개 시트 자동 동기화: ` + _sibs.map(s => `${s.sheet}(${s.qty}주)`).join(', ')
+            : '현재가 직접 입력 — 클릭 후 입력 → Enter/Tab 저장';
+        const _syncBadge = _sibs.length > 0 ? `<span class="text-[8px] text-blue-700 font-bold ml-1">🔗${_sibs.length}</span>` : '';
         let priceCellHTML;
-        if (canEditPrice) {
-            const evalAmt = getEffectiveEval(item);
-            const pricePerShare = qty > 0 ? Math.round((evalAmt / qty) * 100) / 100 : 0;
-            const siblings = findManualSiblings(item);
-            const sibCount = siblings.length;
-            const sibTitle = sibCount > 0
-                ? `🔗 동일종목 ${sibCount}개 자동 동기화: ` + siblings.map(s => `${s.sheet}(${s.qty}주)`).join(', ')
-                : '현재가 직접 입력 — 클릭 후 입력 → Enter/Tab 저장';
-            const syncBadge = sibCount > 0 ? `<span class="text-[8px] text-blue-700 font-bold ml-1">🔗${sibCount}</span>` : '';
-            priceCellHTML = `<td class="text-right whitespace-nowrap" onclick="event.stopPropagation()">
+        if (priceEditable && !isLive) {
+            // 비연동(동기화 안되는 종목) → 바로 입력칸 (매수단가와 동일한 방법)
+            priceCellHTML = `<td id="pcell-${item.id}" class="text-right whitespace-nowrap" onclick="event.stopPropagation()">
                 <input type="number" step="any" value="${pricePerShare||''}" placeholder="입력"
                     class="inline-price-input" id="price-input-${item.id}" data-original="${pricePerShare}"
-                    title="${sibTitle}"
+                    title="${_sibTitle}"
                     onfocus="onInlinePriceFocus(this)"
                     onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();} else if(event.key==='Escape'){this.value=this.dataset.original;this.blur();}"
-                    onblur="onInlinePriceBlur(${item.id}, this.value, ${pricePerShare})">${syncBadge}
+                    onblur="onInlinePriceBlur(${item.id}, this.value, ${pricePerShare})">${_syncBadge}
             </td>`;
+        } else if (priceEditable && isLive) {
+            // 라이브 → 표시, 클릭하면 입력칸으로 전환 (수동 보정 + 전체 시트 동기화)
+            priceCellHTML = `<td id="pcell-${item.id}" class="text-right font-mono font-bold text-orange-800 bg-yellow-50/40 cursor-pointer"
+                title="클릭하면 현재가 수동 입력 (입력 시 전체 시트 동기화)"
+                onclick="event.stopPropagation(); editPriceCell(${item.id}, ${pricePerShare})">${fmtPrice(item.currentPrice, item.currency)} <span class="text-[8px] text-green-600 font-bold">✎</span></td>`;
         } else {
-            priceCellHTML = `<td class="text-right font-mono font-bold text-orange-800 bg-yellow-50/40">${fmtPrice(item.currentPrice, item.currency)}</td>`;
+            // 채권/예금/수량0 → 읽기전용
+            priceCellHTML = `<td class="text-right font-mono font-bold text-gray-500 bg-gray-50/40">${fmtPrice(item.currentPrice, item.currency)}</td>`;
         }
 
         const evalCellClass = isManual
@@ -1340,6 +1346,21 @@ function renderGridTable() {
             totalRow(lbl, currentData, '#6a1b9a', '#f3e8ff');
         }
     }
+}
+
+// 라이브 현재가 셀 클릭 → 입력칸으로 전환 (기존값 비우고 바로 입력, 저장 시 전체 시트 동기화)
+function editPriceCell(itemId, originalPerShare) {
+    const td = document.getElementById('pcell-' + itemId);
+    if (!td) return;
+    td.classList.remove('cursor-pointer');
+    td.innerHTML = `<input type="number" step="any" value="" placeholder="입력"
+        class="inline-price-input" id="price-input-${itemId}" data-original="${originalPerShare}"
+        title="현재가 입력 → Enter/Tab 저장 (동일종목 전체 시트 동기화)"
+        onclick="event.stopPropagation()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();} else if(event.key==='Escape'){renderGridTable();}"
+        onblur="onInlinePriceBlur(${itemId}, this.value, ${originalPerShare})">`;
+    const inp = td.querySelector('input');
+    if (inp) inp.focus();
 }
 
 // 🔵 현재가 칸 포커스(클릭) 시 기존 값 자동 삭제
