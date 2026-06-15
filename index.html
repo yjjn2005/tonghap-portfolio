@@ -1417,20 +1417,20 @@ async function onInlinePriceBlur(itemId, newPriceStr, originalPrice) {
     const qty = Number(item.qty) || 0;
     if (qty <= 0) { toast('❌ 수량이 0입니다', false); return; }
 
-    // ① 수동 현재가 브라우저 영구 저장 (ticker/이름 기준 → 모든 시트 공유)
+    // ① 동일 종목 전체 매칭 — 종목번호(ticker) 또는 종목명 일치하면 모두 (번호 달라도 연동)
     const key = manualKey(item);
-    manualPrices[key] = newPrice;
-    saveManualPrices();
-
-    // ② 동일 종목(전체 시트) 즉시 적용 — 화면 바로 변경 ("안 변함" 문제 해결)
+    const itemName = stripSuffix(item.name || '');
     const synced = [];
     portfolioData.forEach(s => {
-        if (manualKey(s) === key && Number(s.qty) > 0 && s.type !== '채권' && s.type !== '예금/현금') {
+        const sameStock = (manualKey(s) === key) || (itemName && stripSuffix(s.name || '') === itemName);
+        if (sameStock && Number(s.qty) > 0 && s.type !== '채권' && s.type !== '예금/현금') {
+            manualPrices[manualKey(s)] = newPrice;   // 각 행 키로 영구저장 → 새로고침 후에도 유지
             s.currentPrice = newPrice;
             s.evalAmount = Math.round(newPrice * Number(s.qty) * fxOf(s.currency));
             if (s.id !== itemId) synced.push(s.sheet);
         }
     });
+    saveManualPrices();
 
     // ③ 화면 즉시 갱신 (서버 왕복 없이 바로 반영)
     applyUpdates();
@@ -1442,7 +1442,7 @@ async function onInlinePriceBlur(itemId, newPriceStr, originalPrice) {
         : `✅ ${_ps}/주 적용 — 평가 ₩${fmtNum(Math.round(newPrice * qty * fxOf(item.currency)))}`);
 
     // ④ 백그라운드 best-effort 서버 저장 (타기기/영구화 대비, initialEval)
-    const affected = portfolioData.filter(s => manualKey(s) === key && Number(s.qty) > 0 && s.type !== '채권' && s.type !== '예금/현금');
+    const affected = portfolioData.filter(s => ((manualKey(s) === key) || (itemName && stripSuffix(s.name || '') === itemName)) && Number(s.qty) > 0 && s.type !== '채권' && s.type !== '예금/현금');
     (async () => {
         for (const s of affected) {
             try { await apiPost({ action:'update', id: s.id, updates: { initialEval: Math.round(newPrice * Number(s.qty) * fxOf(s.currency)) } }); }
@@ -2013,11 +2013,14 @@ async function crossVerifyPrices() {
         while (idx < entries.length) {
             const [tk, item] = entries[idx++];
             let verified = 0;
-            let code6 = String(item.ticker || '').trim().replace(/\.(KS|KQ|T)$/i, '');
+            const rawCode = String(item.ticker || '').trim().replace(/\.(KS|KQ|T)$/i, '');
+            let code6 = rawCode;
             if (/^\d+$/.test(code6)) code6 = code6.padStart(6, '0');
-            if (item.currency === 'KRW' && /^\d{6}$/.test(code6)) {
-                verified = await yahooKRPrice(code6);                 // 야후 .KS/.KQ 중 실제종목
-                if (!(verified > 0)) verified = await fetchNaverClose(code6);   // 네이버 폴백
+            if (item.currency === 'KRW') {
+                // 네이버 fchart 1순위 (단축코드 0052D0·0177N0·0131V0 등 모두 정확 지원)
+                verified = await fetchNaverClose(rawCode);
+                if (!(verified > 0) && rawCode !== code6) verified = await fetchNaverClose(code6);
+                if (!(verified > 0) && /^\d{6}$/.test(code6)) verified = await yahooKRPrice(code6);  // 야후 폴백
             } else {
                 for (const sym of yahooCandidates(item)) {            // US/JP
                     try {
