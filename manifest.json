@@ -1,0 +1,15 @@
+{
+  "name": "유재진 통합 포트폴리오",
+  "short_name": "포트폴리오",
+  "description": "가족 5인 통합 주식·ETF 포트폴리오 관리 (Google Sheets 동기화)",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f2f1",
+  "theme_color": "#107c41",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
